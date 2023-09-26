@@ -1,14 +1,17 @@
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
+const path = require("path");
 const { PrismaClient } = require('@prisma/client');
 const swaggerUi = require('swagger-ui-express');
 const swaggerJsdoc = require('swagger-jsdoc');
-
+const ExcelJS = require('exceljs');
+const Papa = require('papaparse');
 const prisma = new PrismaClient();
 const app = express();
 
 // Use the cors middleware and enable for all origins
+app.use('/uploads', express.static('uploads'));
 app.use(cors());
 app.use(express.json());
 
@@ -165,6 +168,150 @@ app.get('/exams', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+/**
+ * @swagger
+ * /export/exams:
+ *   get:
+ *     summary: Export exams to Excel
+ *     description: Exports all exam records, optionally filtered by query parameters, as an Excel file.
+ *     produces:
+ *       - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+ *     parameters:
+ *       - name: filter
+ *         in: query
+ *         description: Optional filter to narrow down exams by name, description, or venue.
+ *         required: false
+ *         type: string
+ *     responses:
+ *       200:
+ *         description: Successful operation
+ *         content:
+ *           application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       500:
+ *         description: Internal server error
+ */
+
+app.get('/export/exams', async (req, res) => {
+    try {
+        const { filter } = req.query;
+
+        let whereClause = {};
+
+        if (filter) {
+            const filters = [
+                { name: { contains: filter, mode: 'insensitive' } },
+                { description: { contains: filter, mode: 'insensitive' } },
+                { venue: { contains: filter, mode: 'insensitive' } }
+            ];
+
+            const examMatches = await prisma.exam.findMany({
+                where: {
+                    OR: filters
+                }
+            });
+
+            if (examMatches && examMatches.length > 0) {
+                whereClause.id = {
+                    in: examMatches.map(exam => exam.id)
+                };
+            } else {
+                whereClause.id = -1;
+            }
+        }
+
+        const exams = await prisma.exam.findMany({
+            where: whereClause
+        });
+
+        // Create workbook & add worksheet
+        const workbook = new ExcelJS.Workbook();
+        const worksheet = workbook.addWorksheet('Exams');
+
+        // Define columns in the worksheet
+        worksheet.columns = [
+            { header: 'ID', key: 'id', width: 10 },
+            { header: 'Name', key: 'name', width: 20 },
+            { header: 'Description', key: 'description', width: 30 },
+            { header: 'Venue', key: 'venue', width: 20 }
+            // Add other fields as needed
+        ];
+
+        // Add data to the worksheet
+        worksheet.addRows(exams);
+
+        // Set up Excel download
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename=exams.xlsx');
+
+        // Write the Excel file response
+        await workbook.xlsx.write(res);
+        res.end();
+
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+/**
+ * @swagger
+ * /export/exams/csv:
+ *   get:
+ *     summary: Export exams to CSV
+ *     description: Exports all exam records, optionally filtered by query parameters, as a CSV file.
+ *     produces:
+ *       - text/csv
+ *     parameters:
+ *       - name: filter
+ *         in: query
+ *         description: Optional filter to narrow down exams by name, description, or venue.
+ *         required: false
+ *         type: string
+ *     responses:
+ *       200:
+ *         description: Successful operation
+ *         content:
+ *           text/csv:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       500:
+ *         description: Internal server error
+ */
+app.get('/export/exams/csv', async (req, res) => {
+    try {
+        const { filter } = req.query;
+
+        let whereClause = {};
+
+        if (filter) {
+            const filters = [
+                { name: { contains: filter, mode: 'insensitive' } },
+                { description: { contains: filter, mode: 'insensitive' } },
+                { venue: { contains: filter, mode: 'insensitive' } }
+                // Add other fields as needed
+            ];
+
+            whereClause = {
+                OR: filters
+            };
+        }
+
+        const exams = await prisma.exam.findMany({
+            where: whereClause
+        });
+
+        const csv = Papa.unparse(exams);
+
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename=exams.csv');
+        res.status(200).send(csv);
+
+    } catch (error) {
+        res.status(500).send({ error: error.message });
+    }
+});
 
 /**
  * @swagger
@@ -247,26 +394,94 @@ app.delete('/exam/:id', async (req, res) => {
 // Define storage and naming for uploaded images
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        cb(null, 'uploads/')  // 'uploads/' is the folder where images will be saved. Make sure it exists.
+        cb(null, path.join(__dirname, 'uploads'));  // Using an absolute path
     },
     filename: (req, file, cb) => {
-        cb(null, file.fieldname + '-' + Date.now() + '.' + file.mimetype.split('/')[1])
-    }
-});
-
+        const fileExt = path.extname(file.originalname);
+        const fileName = `${file.originalname.replace(fileExt, "")}-${Date.now()}${fileExt}`;
+        cb(null, fileName);
+    },
+})
 const upload = multer({ storage: storage });
 
 // Endpoint for image upload
-app.post('/upload-image', upload.single('image'), (req, res) => {
-    if (!req.file) {
-        return res.status(400).json({ error: 'Please upload an image' });
+app.post("/upload-image", upload.single("image"), (req, res) => {
+    if (req.file) {
+        // If the upload is successful, send the file's URL as the response
+        res.status(200).json({
+            url: `http://localhost:3000/uploads/${req.file.filename}`,
+        });
+    } else {
+        res.status(400).send("Upload failed");
     }
-
-    // Note: In a real-world scenario, you may want to store this path in your database or move the file to cloud storage.
-    const uploadedImagePath = req.file.path;
-
-    res.json({ url: uploadedImagePath });
 });
+
+app.get("/admin", async (req, res) => {
+    let resp = await getAccessToken();
+    console.log(resp)
+    let registerResp = await registerUser(resp.data.access_token)
+    res.status(200).json(registerResp);
+});
+
+const registerUser = async (token) => {
+    const axios = require('axios');
+    let data = JSON.stringify({
+        "enabled": true,
+        "username": "gg",
+        "email": "test@example.com",
+        "attributes": {
+            "nokp": "951230146065",
+            "nama": "",
+            "phone": ""
+        },
+        "credentials": [
+            {
+                "type": "password",
+                "value": "ff",
+                "temporary": false
+            }
+        ]
+    });
+
+    let config = {
+        method: 'post',
+        maxBodyLength: Infinity,
+        url: 'https://keycloak.cloud-connect.asia/admin/realms/Dagobah/users',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
+        data: data
+    };
+
+    return await axios.request(config)
+}
+
+
+const getAccessToken = async () => {
+    const axios = require('axios');
+    const qs = require('qs');
+    let data = qs.stringify({
+        'grant_type': 'password',
+        'client_id': 'admin-cli',
+        'username': 'admin',
+        'password': 'admin',
+        'client_secret': 'mISqg2mjLOxZA9ku3JgYr7yqiI5HCNqb'
+    });
+
+    let config = {
+        method: 'post',
+        maxBodyLength: Infinity,
+        url: 'https://keycloak.cloud-connect.asia/realms/master/protocol/openid-connect/token',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        data: data
+    };
+
+    return await axios.request(config)
+
+}
 
 
 
