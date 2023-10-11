@@ -8,6 +8,9 @@ const swaggerJsdoc = require('swagger-jsdoc');
 const ExcelJS = require('exceljs');
 const Papa = require('papaparse');
 const prisma = new PrismaClient();
+const nodemailer = require('nodemailer');
+const PDFDocument = require('pdfkit');
+const fs = require('fs');
 const app = express();
 
 // Use the cors middleware and enable for all origins
@@ -125,7 +128,7 @@ app.get('/exams', async (req, res) => {
             const filters = [
                 { name: { contains: filter, mode: 'insensitive' } },
                 { description: { contains: filter, mode: 'insensitive' } },
-                { venue: { contains: filter, mode: 'insensitive' } }
+                { venue: { contains: filter, mode: 'insensitive' } },
                 // Add other fields as needed
             ];
 
@@ -550,6 +553,37 @@ app.post('/question', async (req, res) => {
     } catch (error) {
         res.status(500).json({ error: "Internal Server Error" });
     }
+});
+
+app.get('/generatepdf', (req, res) => {
+    const doc = new PDFDocument();
+
+    // Setting headers to indicate the content type and download
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename=akuan_pematuhan_epks.pdf');
+
+    // Pipe the PDF data to the response
+    doc.pipe(res);
+    // doc.image('JATA_NEGARA_MALAYSIA.png', 0, 0, { width: 595, height: 842 });
+    // Centered horizontally at x = (595 - image_width) / 2
+     doc.image('JATA_NEGARA_MALAYSIA.png', (595 - 100) / 2, 20, { width: 100, height: 100 });
+    doc.fontSize(16).font('Helvetica-Bold').text('SURAT AKUAN PEMATUHAN', 150, 150);  
+    doc.fontSize(16).font('Helvetica-Bold').text('POLISI KESELAMATAN SIBER KEMENTERIAN PERTAHANAN', 50, 180);
+    doc.fontSize(14).font('Times-Roman').text('UAT 15.09.2022', 250, 230);
+    doc.fontSize(14).font('Times-Roman').text('Nama : NUR SYAHADAH BINTI MOHD SALLEH', 50, 270);
+    doc.fontSize(14).font('Times-Roman').text('No KP / Tentera : 860806295128', 50, 300);
+    doc.fontSize(14).font('Times-Roman').text('Jawatan / Pangkat : Pegawai Teknologi Maklumat, Gred F41/F44', 50, 330);
+    doc.fontSize(14).font('Times-Roman').text('Jabatan/ Bahagian/ Perkhidmatan ATM / Syarikat:', 50, 360);
+    doc.fontSize(14).font('Times-Roman').text('BAHAGIAN PENGURUSAN MAKLUMAT', 50, 390);
+    doc.fontSize(14).font('Times-Roman').text('Adalah dengan sesungguhnya dan sebenarnya mengaku bahawa:', 50, 430);
+    doc.fontSize(14).font('Times-Roman').text('1. Saya telah membaca, memahami dan akur akan peruntukan-peruntukan yang terkandung di dalam Polisi Keselamatan Siber Kementerian Pertahanan Malaysia (PKS MINDEF)', 70, 470);
+    doc.fontSize(14).font('Times-Roman').text('   ', 70, 500);
+    doc.fontSize(14).font('Times-Roman').text('2. Sekiranya saya ingkar kepada peruntukan-peruntukan yang ditetapkan, maka tindakan undang-undang boleh diambil ke atas diri saya.', 70, 540);
+    doc.fontSize(14).font('Times-Roman').text('   ', 70, 570);
+    doc.fontSize(14).font('Times-Roman').text('Tarikh : 21 Sep 2022', 50, 610);
+
+    // Finalize PDF
+    doc.end();
 });
 
 const PORT = 3000;
